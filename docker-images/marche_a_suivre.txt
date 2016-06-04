@@ -1,0 +1,170 @@
+﻿--LABO HTTP--
+
+--partie 1--
+
+docker run -d -p 9090:80 php:5.6-apache -> -d pour lancer le container en arrière plan
+-p pour port mapping, donc si écoute sur port 80, on se mappe sur le port 9090
+php:5.6-apache est le nom de l'image
+
+docker ps -> permet d'afficher les containers qui tournent
+docker logs <container_name> -> ici le nom est suspicious_fermi, permet de voir infos sur server apache
+telnet 192.168.42.42 9090 -> pour se connecter (sur server apache) et envoyer requete http
+docker inspect <container_name> -> on obtient info container et surtout adresse ip du container
+docker exec -it <container_name> /bin/bash -> se connecter sur un container en execution + ici on démarre un terminal.
+ATTENTION: ici on travaille dans le file system du container, pratique pour tester. Mais si on stop/supprime le container, on perd tout!!! Donc faire des copies
+echo "Coucou" > index.html -> quand on arrive dans un dossier, apache recherche ce fichier par défaut.
+echo "<h>Coucou</h>" > index.html -> pour ajouter balise html
+echo "<h>Coucou A</h>" > a.html -> pour se connecter sur ce fichier dans navigateur avec 192.168.42.42:9090/a.html
+cd /etc/apache2/ -> configuration du service apache.
+puis cd sites-available pour les fichiers config apache et faire more 000-default
+
+dans Dockerfile on remplace src/ par content/ pour copier le contenu de content.
+
+docker build -t res/apache_php . -> le '.' pour dire on utilise répertoire courant pour la création de l'image
+docker kill <container_name> -> pour tuer un container.
+history -> permet d'afficher toutes les ancienne commande ;)
+
+chercher bootstrap et copier le contenu dans le dossier content. Rebuilder.
+open index.html -> ouvrir la page en local.
+
+git add docker-images/
+git commit -m "Docker image 'static HTML with apache+php' working and validated"
+git push origin fb-apache-static
+
+------------------------------
+
+--Partie 2a--
+
+git checkout -b fb-express-dynamic
+mkdir express-image
+touch express-image/Dockerfile
+
+dans Dockerfile:
+
+FROM node:4.4 -> on utilise la version 4.4 de node (on utilise cette image de node)
+
+COPY src /opt/app -> on copie le contenu de src dans /pt/app
+
+CMD ["node", "/opt/app/index.js"] -> on indique la commande à executer quand on lance un container sur la base de cette image (execute le script index.js)
+
+mkdir src
+cd src
+npm init -> démmarre une nouvelle application node.js
+npm install --save chance
+touch index.js
+
+on édite notre fichier .js
+node index.js
+
+cd ..
+docker build -t res/express_students .
+docker run res/express_students -> à chaque fois on lance un container, le container execute l'application node et s'affiche.
+dès que le script a finit son execution, le container est stoppé.
+docker ps -a -> afficher liste container exectué
+docker run -it res/express_students /bin/bash -> pour se connecter en intéractif
+donc on est connecté sur un nouveau container basé sur notre image.
+node -v -> affiche version 4.4
+cd /opt/app -> on a les fichiers qui utilisent ce quôn avait fait.
+
+--Partie 2b--
+
+Maintenant on veut écrire une application web (http)
+pour connaitre anatomy d'une requête -> https://nodejs.org/en/docs/guides/anatomy-of-an-http-transaction/
+on va utiliser Express.js comme framework -> http://expressjs.com/en/starter/installing.html
+installer express generator -> http://expressjs.com/en/starter/generator.html
+npm install --save --no-bin-links express
+Does providing the --no-bin-links option to npm install solve your issue? YES!!!
+compléter le javascript
+aller dans /src puis node index.js
+dans un autre terminal: telnet 192.168.42.42 3000
+
+docker build -t res/express_students .
+docker run -p 9090:3000 res/express_students -> pour arriere plan
+telnet 192.168.42.42 9090
+
+--Partie 3a--
+
+requête ajax: le code js généré sur la page envoie d'autres requêtes vers un serveur
+pour les utiliser on doit utiliser reverse proxy qui permet de faire l'aiguillage vers nos containers
+en fonction des entêtes des requêtes.
+
+--Partie 3b--
+
+docker run -d --name apache_static res/apache_php
+docker run -d --name express_dynamic res/express_students
+docker inspect apache_static | grep -i ipaddress -> 172.17.0.2
+docker inspect express_dynamic | grep -i ipaddress -> 172.17.0.3
+vagrant ssh
+
+telnet 172.17.0.2 80 -> adresse ip ci dessus.
+GET / HTTP/1.0
+
+telnet 172.17.0.3 3000
+GET...
+
+mtn on configure revere proxy pour accéder au bon container
+
+cd docker-images
+git checkout -b fb-apache-reverse-proxy
+git branch
+mkdir apache-reverse-proxy
+cd apache-reverse-proxy
+touch Dockerfile
+docker run -it -p 8080:80 php:5.6-apache /bin/bash
+cd /etc/
+cd apache2/ -> config serveur apache
+cd sites-available -> default-ssl.config
+cp 000-default.conf 001-reverse-proxy.conf
+apt-get update pour installer vi
+apt-get install vim
+vi 001-reverse-proxy.conf
+service apache2 restart
+cd ..
+a2ensite 001*
+a2enmod proxy
+a2enmod proxy_http
+service apache2 reload
+httpd.apache.org -> reverse proxy.
+
+dans un autre terminal:
+telnet 172.17.0.2 80 -> pas joignable directement (donc ok)
+telnet 192.168.42.42 8080 -> ok avec get normal
+telnet 192.168.42.42 8080 -> GET /api/students/ HTTP/1.0 -> OK!
+
+--Partie 3c--
+
+docker build -t res/apache_rp .
+docker run -p 8080:80 res/apache_rp
+A ce stade le navigateur nous bloque
+
+telnet 192.168.42.42 8080
+GET /api/students/ HTTP/1.0
+Host: demo.res.ch
+
+configurer hosts -> C:\Windows\System32\drivers\etc
+dans cmd, ping demo.res.ch
+dans chrome, demo.res.ch:8080 ou demo.res.ch:8080/api/students/
+
+--Partie 4--
+
+git checkout -b fb-ajax-jquery
+cd apache-php-image
+manip Dockerfile
+docker build -t res/apache_php .
+cd ..
+docker build -t res/apache_rp .
+docker build -t res/express_students .
+
+
+
+
+
+
+
+
+
+
+
+
+
+
